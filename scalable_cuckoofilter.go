@@ -3,6 +3,7 @@ package cuckoo
 import (
 	"bytes"
 	"encoding/gob"
+	"fmt"
 )
 
 const (
@@ -25,10 +26,11 @@ type Store struct {
 }
 
 /*
- by default option the grow capacity is:
- capacity , total
- 4096  4096
- 8192  12288
+	by default option the grow capacity is:
+	capacity , total
+	4096  4096
+	8192  12288
+
 16384  28672
 32768  61440
 65536  126,976
@@ -68,6 +70,9 @@ func (sf *ScalableCuckooFilter) Insert(data []byte) bool {
 	}
 	if !needScale {
 		return true
+	}
+	if needScale {
+		fmt.Println(string(data))
 	}
 	newFilter := NewFilter(sf.scaleFactor(uint(len(lastFilter.buckets))))
 	sf.filters = append(sf.filters, newFilter)

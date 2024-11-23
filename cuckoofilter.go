@@ -10,9 +10,17 @@ const maxCuckooCount = 500
 
 // Filter is a probabilistic counter
 type Filter struct {
-	buckets   []bucket
-	count     uint
-	bucketPow uint
+	undo         InsertionStorage
+	buckets      []bucket
+	count        uint
+	bucketPow    uint
+	reinsetCount int
+}
+
+type InsertionStorage struct {
+	indexOfBucket [maxCuckooCount]uint
+	fps           [maxCuckooCount]fingerprint
+	indices       [maxCuckooCount]uint
 }
 
 // NewFilter returns a new cuckoofilter with a given capacity.
@@ -66,6 +74,7 @@ func (cf *Filter) Insert(data []byte) bool {
 	if cf.insert(fp, i2) {
 		return true
 	}
+	cf.reinsetCount++
 	return cf.reinsert(fp, randi(i1, i2))
 }
 
@@ -90,6 +99,9 @@ func (cf *Filter) reinsert(fp fingerprint, i uint) bool {
 		j := rand.Intn(bucketSize)
 		oldfp := fp
 		fp = cf.buckets[i][j]
+		// cf.undo.indices[k] = i // store changes to undo
+		// cf.undo.indexOfBucket[k] = uint(j)
+		// cf.undo.fps[k] = fp
 		cf.buckets[i][j] = oldfp
 
 		// look in the alternate location for that random element
@@ -98,6 +110,12 @@ func (cf *Filter) reinsert(fp fingerprint, i uint) bool {
 			return true
 		}
 	}
+	// for k := maxCuckooCount - 1; k >= 0; k-- {
+	// 	i := cf.undo.indices[k]
+	// 	j := cf.undo.indexOfBucket[k]
+	// 	fp := cf.undo.fps[k]
+	// 	cf.buckets[i][j] = fp
+	// }
 	return false
 }
 
