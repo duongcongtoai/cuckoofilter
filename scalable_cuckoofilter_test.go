@@ -9,90 +9,64 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func Test_ScalableCuckooFilter_FalseNegative(t *testing.T) {
+func Test_ScalableCuckooFilter_Reliability(t *testing.T) {
 	filter := NewScalableCuckooFilter()
 
-	// filter := NewFilter(100000)
-	exist := []string{}
-	removed := []string{}
-	for i := 0; i < 15000; i++ {
-		id := fmt.Sprintf("%d-", i) + uuid.NewString()
-		exist = append(exist, id)
-		removed = append(removed, id+"to-removed")
-	}
-	for i := 0; i < len(exist); i++ {
-		filter.Insert([]byte(exist[i]))
-	}
-	for i := 0; i < len(exist); i++ {
-		filter.Insert([]byte(removed[i]))
-	}
+	permaElements := make([]string, 0, DefaultCapacity)
+	dynamicElements := make([]string, 0, DefaultCapacity)
+	aliens := make([]string, 0, DefaultCapacity)
 
-	for i := 0; i < len(exist); i++ {
-		filter.Delete([]byte(removed[i]))
+	// so it trigger the scaling
+	for i := 0; i < DefaultCapacity; i++ {
+		id := fmt.Sprintf("%d-", i) + uuid.NewString()
+		permaElements = append(permaElements, id)
+		dynamicElements = append(dynamicElements, id+"dynamic")
+		aliens = append(aliens, id+"alien")
 	}
-	for i := 0; i < len(exist); i++ {
-		filter.Insert([]byte(removed[i]))
+	for i := 0; i < len(permaElements); i++ {
+		filter.Insert([]byte(permaElements[i]))
+	}
+	for i := 0; i < len(dynamicElements); i++ {
+		filter.Insert([]byte(dynamicElements[i]))
+	}
+	falsePositive := 0
+	for i := 0; i < len(aliens); i++ {
+		exist := filter.Lookup([]byte(aliens[i]))
+		if exist {
+			falsePositive++
+		}
+	}
+	assert.Less(t, float64(falsePositive)/float64(len(aliens)), 0.001)
+
+	// Delete and add back
+	for i := 0; i < len(permaElements); i++ {
+		filter.Delete([]byte(dynamicElements[i]))
+	}
+	for i := 0; i < len(permaElements); i++ {
+		filter.Insert([]byte(dynamicElements[i]))
 	}
 	falseNegatives := []int{}
-	for i := 0; i < len(exist); i++ {
-		exist := filter.Lookup([]byte(exist[i]))
+	for i := 0; i < len(permaElements); i++ {
+		exist := filter.Lookup([]byte(permaElements[i]))
+		if !exist {
+			falseNegatives = append(falseNegatives, i)
+		}
+		exist = filter.Lookup([]byte(dynamicElements[i]))
 		if !exist {
 			falseNegatives = append(falseNegatives, i)
 		}
 	}
 	assert.Equal(t, 0, len(falseNegatives))
-}
 
-func TestTodo(t *testing.T) {
-	filter := NewScalableCuckooFilterV2()
-	batchInsert := func(filter *ScalableCuckooFilterv2, exist []string,
-		historicalData func() []string) {
-	TRYLOOP:
-		for {
-			for _, item := range exist {
-				_, err := filter.Insert([]byte(item))
-				if err != nil {
-					filter.ResetAndScale()
-					for _, oldItem := range historicalData() {
-						_, err := filter.Insert([]byte(oldItem))
-						if err != nil {
-							panic(err)
-						}
-					}
-					continue TRYLOOP
-				}
-			}
-			return
+	falsePositive = 0
+	for i := 0; i < len(aliens); i++ {
+		exist := filter.Lookup([]byte(aliens[i]))
+		if exist {
+			falsePositive++
 		}
 	}
-	// filter := NewFilter(100000)
-	exist := []string{}
-	removed := []string{}
-	for i := 0; i < 15000; i++ {
-		id := fmt.Sprintf("%d-", i) + uuid.NewString()
-		exist = append(exist, id)
-		removed = append(removed, id+"1")
-	}
-	batchInsert(filter, exist, func() []string { return nil })
-	batchInsert(filter, removed, func() []string { return exist })
-
-	for i := 0; i < len(exist); i++ {
-		filter.Delete([]byte(removed[i]))
-	}
-
-	batchInsert(filter, removed, func() []string { return exist })
-
-	falsePositive := []int{}
-	for i := 0; i < len(exist); i++ {
-		exist := filter.Lookup([]byte(exist[i]))
-		if !exist {
-			falsePositive = append(falsePositive, i)
-		}
-	}
-	if len(falsePositive) > 0 {
-		panic(fmt.Sprintf("%d", len(falsePositive)))
-	}
-	fmt.Println(len(filter.filters.buckets) * 4)
+	fmt.Println(len(filter.Encode()))
+	assert.Less(t, float64(falsePositive)/float64(len(aliens)), 0.001)
 }
 
 func TestNormalUse(t *testing.T) {
@@ -129,7 +103,7 @@ func TestScalableCuckooFilter_DecodeEncode(t *testing.T) {
 	b := decodeFilter.Lookup([]byte("NewScalableCuckooFilter_233"))
 	assert.True(t, b)
 	for i, f := range decodeFilter.filters {
-		assert.Equal(t, f.count, filter.filters[i].count)
+		assert.Equal(t, f.Count(), filter.filters[i].Count())
 	}
 
 }

@@ -5,6 +5,7 @@ go 1.22
 require (
 	github.com/dgryski/go-metro v0.0.0-20200812162917-85c65e2d0165
 	github.com/google/uuid v1.6.0
+	github.com/panmari/cuckoofilter v1.0.6
 	github.com/stretchr/testify v1.6.1
 )
 

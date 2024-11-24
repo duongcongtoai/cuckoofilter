@@ -3,7 +3,8 @@ package cuckoo
 import (
 	"bytes"
 	"encoding/gob"
-	"fmt"
+
+	f16 "github.com/panmari/cuckoofilter"
 )
 
 const (
@@ -12,29 +13,43 @@ const (
 )
 
 type ScalableCuckooFilter struct {
-	filters    []*Filter
+	filters    []*f16.Filter
 	loadFactor float32
+	initialCap uint
 	//when scale(last filter size * loadFactor >= capacity) get new filter capacity
-	scaleFactor func(capacity uint) uint
+	// scaleFactor func(capacity uint) uint
+}
+
+func WithLoadFactor(loadFactor float32) option {
+	return func(sfilter *ScalableCuckooFilter) {
+		sfilter.loadFactor = loadFactor
+	}
+}
+
+func WithInitialCap(cap uint) option {
+	return func(sfilter *ScalableCuckooFilter) {
+		sfilter.initialCap = cap
+	}
 }
 
 type option func(*ScalableCuckooFilter)
-
 type Store struct {
 	Bytes      [][]byte
 	LoadFactor float32
 }
 
-/*
-	by default option the grow capacity is:
-	capacity , total
-	4096  4096
-	8192  12288
-
-16384  28672
-32768  61440
-65536  126,976
-*/
+// NewScalableCuckooFilter naive implementation of scalable cuckoo filter
+// but guarantees the followings:
+// - zero false-negative
+// - false-positive rate is less than 0.001 (it is actually even less than 0.0005, but
+// the correct rate is not calculated by the author yet)
+// Note that even though "github.com/panmari/cuckoofilter" implementation
+// provide r ~= 0.0001, the implementation of scalable cuckoo filter
+// theoretically has higher r, because it also correlates with the number of underlying
+// filters.
+//
+// It is suggested that user rebuilt the filter overtime to achieve the best performance
+// if the size of data scales up/down overtime.
 func NewScalableCuckooFilter(opts ...option) *ScalableCuckooFilter {
 	sfilter := new(ScalableCuckooFilter)
 	for _, opt := range opts {
@@ -62,7 +77,7 @@ func (sf *ScalableCuckooFilter) Reset() {
 func (sf *ScalableCuckooFilter) Insert(data []byte) bool {
 	needScale := false
 	lastFilter := sf.filters[len(sf.filters)-1]
-	if (float32(lastFilter.count) / float32(len(lastFilter.buckets))) > sf.loadFactor {
+	if lastFilter.LoadFactor() > float64(sf.loadFactor) {
 		needScale = true
 	} else {
 		b := lastFilter.Insert(data)
@@ -71,10 +86,8 @@ func (sf *ScalableCuckooFilter) Insert(data []byte) bool {
 	if !needScale {
 		return true
 	}
-	if needScale {
-		fmt.Println(string(data))
-	}
-	newFilter := NewFilter(sf.scaleFactor(uint(len(lastFilter.buckets))))
+
+	newFilter := f16.NewFilter(sf.initialCap)
 	sf.filters = append(sf.filters, newFilter)
 	return newFilter.Insert(data)
 }
@@ -98,7 +111,7 @@ func (sf *ScalableCuckooFilter) Delete(data []byte) bool {
 func (sf *ScalableCuckooFilter) Count() uint {
 	var sum uint
 	for _, filter := range sf.filters {
-		sum += filter.count
+		sum += filter.Count()
 	}
 	return sum
 
@@ -144,12 +157,12 @@ func DecodeScalableFilter(fBytes []byte) (*ScalableCuckooFilter, error) {
 	}
 	filterSize := len(store.Bytes)
 	instance := NewScalableCuckooFilter(func(filter *ScalableCuckooFilter) {
-		filter.filters = make([]*Filter, filterSize)
+		filter.filters = make([]*f16.Filter, filterSize)
 	}, func(filter *ScalableCuckooFilter) {
 		filter.loadFactor = store.LoadFactor
 	})
 	for i, oneBytes := range store.Bytes {
-		filter, err := Decode(oneBytes)
+		filter, err := f16.Decode(oneBytes)
 		if err != nil {
 			return nil, err
 		}
@@ -163,13 +176,19 @@ func configure(sfilter *ScalableCuckooFilter) {
 	if sfilter.loadFactor == 0 {
 		sfilter.loadFactor = DefaultLoadFactor
 	}
-	if sfilter.scaleFactor == nil {
-		sfilter.scaleFactor = func(currentSize uint) uint {
-			return currentSize * bucketSize * 2
-		}
+	if sfilter.initialCap == 0 {
+		sfilter.initialCap = DefaultCapacity
 	}
+	// NOTE: in order for scalable cuckfoo filter to provide reliable deletion
+	// the size of all children filters must be the same
+	// H. Chen, L. Liao, H. Jin and J. Wu, "The dynamic cuckoo filter"
+	// if sfilter.scaleFactor == nil {
+	// 	sfilter.scaleFactor = func(currentSize uint) uint {
+	// 		return currentSize * bucketSize
+	// 	}
+	// }
 	if sfilter.filters == nil {
-		initFilter := NewFilter(DefaultCapacity)
-		sfilter.filters = []*Filter{initFilter}
+		initFilter := f16.NewFilter(sfilter.initialCap)
+		sfilter.filters = []*f16.Filter{initFilter}
 	}
 }
